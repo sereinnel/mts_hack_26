@@ -34,13 +34,17 @@ docker compose up --build
 
 ## Подключение RAG участника №1
 
-Укажите `AI_FUNCTION=src.energytool.consultant:consult` или другой **реальный** импортируемый путь и сделайте пакет доступным для Python (проекту может потребоваться добавить модули в Dockerfile и зависимости в requirements.txt). Функция может быть `def` или `async def`, принимает `question, history` и возвращает:
+Текущий `backend/ai_adapter.py` использует прежний интерфейс `consult(question, history)`. Для него `AI_FUNCTION` должна указывать на реальную совместимую функцию в формате `package.module:consult`. Функция может быть `def` или `async def` и возвращает:
 
 ```python
 {"answer": "...", "sources": ["22-askue.md"], "intent": "energy_accounting"}
 ```
 
 Без AI_FUNCTION эндпоинт работает только в демонстрационном режиме и возвращает заглушку; реальные рекомендации отсутствуют.
+
+В `ai/consultant.py` реализован отдельный синхронный `answer_turn(message, history, session_facts, debug=False)` с согласованным расширенным контрактом. Доступен локальный RAG baseline без дополнительных зависимостей. **Он ещё не подключён к HTTP API.** Прямой импорт, построение индекса, проверка и задачи интеграции описаны в [документации AI-модуля](docs/AI_MODULE.md). Установка `AI_FUNCTION=ai.consultant:answer_turn` до адаптации backend не работает.
+
+Для backend подготовлена [задача интеграции с критериями приёмки](docs/BACKEND_AI_TASK.md). Необязательная генерация и семантический Critic пока проверены на заглушках; предварительный разбор качества и команды будущего прогона на API описаны в [AI_QUALITY.md](docs/AI_QUALITY.md).
 
 ## Проверка
 

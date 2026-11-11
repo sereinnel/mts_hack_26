@@ -16,3 +16,6 @@ knowledge-base.zip
 knowledge_base/
 indexes/
 *.log
+# Local case materials and derived AI artifacts (never commit the corpus).
+/Данные*/
+/МТС_*.pdf
