@@ -6,3 +6,7 @@ __pycache__
 data/
 *.zip
 *.sqlite3
+Данные*/
+МТС_*.pdf
+knowledge_base/
+indexes/
