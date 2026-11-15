@@ -13,7 +13,8 @@ from typing import Any
 
 
 async def consult_ai(
-    question: str, history: list[dict[str, str]], session_facts: dict | None = None
+    question: str, history: list[dict[str, str]], session_facts: dict | None = None,
+    debug: bool = False,
 ) -> dict[str, Any]:
     target = os.getenv("AI_FUNCTION", "").strip()
     if not target:
@@ -26,6 +27,9 @@ async def consult_ai(
             "intent": "mock",
             "updated_facts": dict(session_facts or {}),
             "stage": None,
+            "route": "mock",
+            "proposed_action": None,
+            "debug": None,
         }
 
     module_name, separator, function_name = target.partition(":")
@@ -37,7 +41,7 @@ async def consult_ai(
         "message": question,
         "history": history,
         "session_facts": dict(session_facts or {}),
-        "debug": False,
+        "debug": debug,
     }
     if inspect.iscoroutinefunction(func):
         result = await func(**kwargs)
@@ -60,4 +64,7 @@ async def consult_ai(
         "intent": str(result.get("intent", "unknown")),
         "updated_facts": updated_facts,
         "stage": result.get("stage"),
+        "route": result.get("route"),
+        "proposed_action": result.get("proposed_action"),
+        "debug": result.get("debug") if debug else None,
     }
