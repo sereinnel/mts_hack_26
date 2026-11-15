@@ -6,7 +6,7 @@ import time
 from contextlib import asynccontextmanager
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -30,6 +30,7 @@ app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["GET","
 class ChatRequest(BaseModel):
     session_id: str = Field(min_length=1, max_length=80)
     message: str = Field(min_length=1, max_length=4000)
+    debug: bool = False
 
 
 class LeadRequest(BaseModel):
@@ -81,27 +82,46 @@ def close_session(session_id: str):
 
 
 @app.post("/api/chat")
-async def chat(payload: ChatRequest):
+async def chat(payload: ChatRequest, x_admin_token: Annotated[str | None, Header()] = None):
     if not db.session_exists(payload.session_id, active_only=True):
         raise HTTPException(status_code=404, detail="Active session not found")
+    # Diagnostic details are internal; only a server-side admin token enables them.
+    if payload.debug:
+        require_admin(x_admin_token)
     history = [{"role": item["role"], "content": item["content"]} for item in db.list_messages(payload.session_id)]
     session_facts = db.get_session_facts(payload.session_id)
     # Persist user text even if the upstream AI service later fails.
     db.add_message(payload.session_id, "user", payload.message)
     started = time.perf_counter()
     try:
-        result = await consult_ai(payload.message, history, session_facts=session_facts)
+        ai_kwargs = {"session_facts": session_facts}
+        if payload.debug:
+            ai_kwargs["debug"] = True
+        result = await consult_ai(payload.message, history, **ai_kwargs)
     except Exception:
         log.exception("AI call failed for session_id=%s", payload.session_id)
         raise HTTPException(status_code=502, detail="AI temporarily unavailable") from None
     latency_ms = round((time.perf_counter() - started) * 1000)
     db.save_session_facts(payload.session_id, result["updated_facts"], result.get("stage"))
     db.add_message(payload.session_id, "assistant", result["answer"], result["sources"], result["intent"])
-    return {"session_id": payload.session_id, "answer": result["answer"], "sources": result["sources"], "intent": result["intent"], "latency_ms": latency_ms}
+    response = {
+        "session_id": payload.session_id,
+        "answer": result["answer"],
+        "sources": result["sources"],  # Existing frontend contract.
+        "source_ids": result["sources"],
+        "intent": result["intent"],
+        "latency_ms": latency_ms,
+        "stage": result.get("stage"),
+        "route": result.get("route"),
+        "suggested_action": result.get("proposed_action"),
+    }
+    if payload.debug:
+        response["diagnostics"] = result.get("debug")
+    return response
 
 
 @app.post("/api/leads", status_code=201)
-def post_lead(payload: LeadRequest):
+def post_lead(payload: LeadRequest, response: Response):
     if not db.session_exists(payload.session_id):
         raise HTTPException(status_code=404, detail="Session not found")
     if not payload.consent_to_contact:
@@ -114,7 +134,12 @@ def post_lead(payload: LeadRequest):
         f"Контакт: {payload.full_name}; телефон: {payload.phone}\n"
         "Основные реплики клиента:\n" + "\n".join(f"- {text[:400]}" for text in recent_requests)
     )
-    return db.create_lead(payload.session_id, payload.full_name, payload.phone, payload.company, summary)
+    try:
+        lead, created = db.create_lead(payload.session_id, payload.full_name, payload.phone, payload.company, summary)
+    except db.LeadConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    response.status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
+    return lead
 
 
 @app.get("/api/leads", dependencies=[Depends(require_admin)])

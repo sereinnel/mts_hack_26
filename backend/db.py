@@ -142,15 +142,40 @@ def save_session_facts(session_id: str, facts: dict, stage: str | None = None) -
         )
 
 
-def create_lead(session_id: str, full_name: str, phone: str, company: str, summary: str) -> dict:
-    lead_id = str(uuid4())
-    created_at = utcnow()
+class LeadConflictError(Exception):
+    """A session already has a lead with different contact details."""
+
+
+def create_lead(session_id: str, full_name: str, phone: str, company: str, summary: str) -> tuple[dict, bool]:
+    """Return (lead, created). Retries for the same lead reuse its original ID.
+
+    One lead per session. BEGIN IMMEDIATE makes the check-and-insert atomic even
+    when two requests arrive simultaneously. Existing database records are kept.
+    """
     with connection() as db:
+        db.execute("BEGIN IMMEDIATE")
+        existing = db.execute(
+            "SELECT id,session_id,full_name,phone,company,summary,created_at "
+            "FROM leads WHERE session_id=? ORDER BY created_at,id LIMIT 1",
+            (session_id,),
+        ).fetchone()
+        if existing:
+            if (existing["full_name"], existing["phone"], existing["company"]) != (full_name, phone, company):
+                raise LeadConflictError("This session already has a lead with different contact details")
+            return {
+                "id": existing["id"],
+                "session_id": existing["session_id"],
+                "summary": existing["summary"],
+                "created_at": existing["created_at"],
+            }, False
+
+        lead_id = str(uuid4())
+        created_at = utcnow()
         db.execute(
             "INSERT INTO leads(id,session_id,full_name,phone,company,summary,consent_to_contact,created_at) VALUES (?,?,?,?,?,?,1,?)",
-            (lead_id,session_id,full_name,phone,company,summary,created_at),
+            (lead_id, session_id, full_name, phone, company, summary, created_at),
         )
-    return {"id": lead_id, "session_id": session_id, "summary": summary, "created_at": created_at}
+    return {"id": lead_id, "session_id": session_id, "summary": summary, "created_at": created_at}, True
 
 
 def list_leads() -> list[dict]:
