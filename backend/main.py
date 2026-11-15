@@ -6,7 +6,7 @@ import time
 from contextlib import asynccontextmanager
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -121,7 +121,7 @@ async def chat(payload: ChatRequest, x_admin_token: Annotated[str | None, Header
 
 
 @app.post("/api/leads", status_code=201)
-def post_lead(payload: LeadRequest):
+def post_lead(payload: LeadRequest, response: Response):
     if not db.session_exists(payload.session_id):
         raise HTTPException(status_code=404, detail="Session not found")
     if not payload.consent_to_contact:
@@ -134,7 +134,12 @@ def post_lead(payload: LeadRequest):
         f"Контакт: {payload.full_name}; телефон: {payload.phone}\n"
         "Основные реплики клиента:\n" + "\n".join(f"- {text[:400]}" for text in recent_requests)
     )
-    return db.create_lead(payload.session_id, payload.full_name, payload.phone, payload.company, summary)
+    try:
+        lead, created = db.create_lead(payload.session_id, payload.full_name, payload.phone, payload.company, summary)
+    except db.LeadConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    response.status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
+    return lead
 
 
 @app.get("/api/leads", dependencies=[Depends(require_admin)])
