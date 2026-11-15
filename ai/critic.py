@@ -27,6 +27,7 @@ def select_evidence(
 ) -> list[Evidence]:
     """Keep whole paragraphs, so sentence-level caveats are not truncated."""
     query_terms = term_weights if term_weights is not None else Counter(words(query))
+    definition_requested = bool(re.search(r"\bчто\s+(?:такое|такой|такая)\b", query, re.I))
     candidates = []
     for rank, hit in enumerate(hits):
         chunk = hit.chunk
@@ -70,11 +71,16 @@ def select_evidence(
             if not overlap and not heading_overlap:
                 continue
             score = (overlap + 0.8 * heading_overlap) / max(15, count) ** 0.15
+            # A definition request needs the introductory description, not an
+            # incidental condition from the same section matching "task".
+            introductory = bool(definition_requested and index == 0
+                                and re.fullmatch(r"что это|определение|описание|назначение",
+                                                 chunk.heading.split(" / ")[-1], re.I))
             score *= 1 - 0.035 * rank
-            candidates.append((score, chunk.chunk_id, text, Evidence(chunk.source_id, chunk.chunk_id, text)))
-    candidates.sort(key=lambda item: (-item[0], item[1], item[2]))
+            candidates.append((introductory, score, chunk.chunk_id, text, Evidence(chunk.source_id, chunk.chunk_id, text)))
+    candidates.sort(key=lambda item: (-item[0], -item[1], item[2], item[3]))
     # Return one coherent passage rather than stitching unrelated claims.
-    return [candidates[0][3]] if candidates else []
+    return [candidates[0][4]] if candidates else []
 
 
 @dataclass(frozen=True)

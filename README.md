@@ -34,17 +34,19 @@ docker compose up --build
 
 ## Подключение RAG участника №1
 
-Текущий `backend/ai_adapter.py` использует прежний интерфейс `consult(question, history)`. Для него `AI_FUNCTION` должна указывать на реальную совместимую функцию в формате `package.module:consult`. Функция может быть `def` или `async def` и возвращает:
+`backend/ai_adapter.py` подключён к согласованному синхронному `ai.consultant.answer_turn(message, history, session_facts, debug=False)`. Для включения задайте `AI_FUNCTION=ai.consultant:answer_turn` и путь к приватной БЗ/индексу. Адаптер передаёт историю и факты сессии, а в существующий HTTP-ответ преобразует:
 
 ```python
-{"answer": "...", "sources": ["22-askue.md"], "intent": "energy_accounting"}
+{"answer": "...", "sources": ["relative/document.md"], "intent": "unknown"}
 ```
 
 Без AI_FUNCTION эндпоинт работает только в демонстрационном режиме и возвращает заглушку; реальные рекомендации отсутствуют.
 
-В `ai/consultant.py` реализован отдельный синхронный `answer_turn(message, history, session_facts, debug=False)` с согласованным расширенным контрактом. Доступен локальный RAG baseline без дополнительных зависимостей. **Он ещё не подключён к HTTP API.** Прямой импорт, построение индекса, проверка и задачи интеграции описаны в [документации AI-модуля](docs/AI_MODULE.md). Установка `AI_FUNCTION=ai.consultant:answer_turn` до адаптации backend не работает.
+Доступен локальный RAG baseline без дополнительных зависимостей. AI извлекает явно сообщённые тип организации и цель, а backend сохраняет полный `updated_facts` в SQLite по сессии. Прямой импорт, построение индекса и ограничения извлечения описаны в [документации AI-модуля](docs/AI_MODULE.md).
 
 Для backend подготовлена [задача интеграции с критериями приёмки](docs/BACKEND_AI_TASK.md). Необязательная генерация и семантический Critic пока проверены на заглушках; предварительный разбор качества и команды будущего прогона на API описаны в [AI_QUALITY.md](docs/AI_QUALITY.md).
+
+Для конкурсного `solution.py` доступен `answer_question(question, knowledge_base) -> str`. AI-модули экспортируются в плоскую структуру через `python -m scripts.export_ai_modules --output data/submission_ai`. Импорт из корня конкурсного ZIP: `from energytool_ai import answer_question`. Подробнее: [SUBMISSION_AI.md](docs/SUBMISSION_AI.md).
 
 ## Проверка
 

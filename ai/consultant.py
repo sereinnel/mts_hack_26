@@ -1,17 +1,18 @@
 """Synchronous, standalone AI entry point agreed with the backend team."""
 from __future__ import annotations
 
-from copy import deepcopy
 import os
 from time import perf_counter
+from collections.abc import Callable
 
 from . import prompts
 from .critic import review_evidence, select_evidence
 from .dialogue import normalize_turn
+from .facts import update_facts
 from .generation import generate_answer, semantic_review, usable_hits
 from .llm import ChatClient, LLMConfig, LLMError
 from .planner import make_plan
-from .retriever import configured_retriever
+from .retriever import Retriever, configured_retriever
 from .schemas import Stage, TurnResult
 from .topics import identify_topic
 
@@ -24,12 +25,29 @@ def answer_turn(
 ) -> dict:
     """Answer one turn without storing session data or creating a lead.
 
-    Facts are currently passed through as a deep-copied complete snapshot.
+    Explicit customer industry/goal are merged into a deep-copied full snapshot.
     Default mode is extractive. AI_MODE=llm explicitly enables model API calls.
     Invalid input/configuration raises an exception for the caller to handle.
     """
-    started = perf_counter()
     mode = os.getenv("AI_MODE", "extractive").strip() or "extractive"
+    return _answer_turn(
+        message, history, session_facts, debug,
+        mode=mode, retriever_provider=configured_retriever,
+    )
+
+
+def _answer_turn(
+    message: str,
+    history: list[dict],
+    session_facts: dict,
+    debug: bool,
+    *,
+    mode: str,
+    retriever_provider: Callable[[], Retriever | None],
+    top_k: int = 8,
+) -> dict:
+    """Shared core with per-call dependencies, without process-env mutation."""
+    started = perf_counter()
     if mode not in {"extractive", "llm"}:
         raise ValueError("AI_MODE must be extractive or llm")
     if not isinstance(session_facts, dict):
@@ -38,7 +56,7 @@ def answer_turn(
         raise TypeError("debug must be a boolean")
     current, turns = normalize_turn(message, history)
     plan = make_plan(current, turns)
-    facts = deepcopy(session_facts)
+    facts = update_facts(current, turns, session_facts)
     diagnostics = {"mode": "offline_extractive", "reason": plan.reason, "critic": "not_needed"}
 
     def finish(
@@ -72,7 +90,7 @@ def answer_turn(
     if plan.route == "clarify":
         return finish(prompts.CLARIFY, "qualify", "clarify")
 
-    retriever = configured_retriever()
+    retriever = retriever_provider()
     if retriever is None:
         diagnostics["knowledge"] = "not_configured"
         answer = prompts.NO_KNOWLEDGE
@@ -80,7 +98,7 @@ def answer_turn(
             answer = prompts.REFUSAL_ACK + " " + answer
         return finish(answer, "discover", "simple")
 
-    hits = retriever.search(plan.query, top_k=8, topic=plan.topic)
+    hits = retriever.search(plan.query, top_k=top_k, topic=plan.topic)
     if mode == "llm" and usable_hits(hits):
         # Missing explicit configuration must not masquerade as a tested model.
         client = ChatClient(LLMConfig.from_env())

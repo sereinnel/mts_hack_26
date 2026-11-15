@@ -9,6 +9,7 @@ from unittest.mock import patch
 import zipfile
 
 from ai.retriever import Retriever, chunk_document, configured_retriever, load_chunks
+from ai.planner import make_plan
 
 
 class RetrievalTests(unittest.TestCase):
@@ -117,3 +118,25 @@ class RetrievalTests(unittest.TestCase):
         sentence = " ".join(["демонстрационный"] * 100)
         chunks = chunk_document("prose.md", sentence, max_chars=200)
         self.assertEqual(" ".join(" ".join(chunk.text.split()) for chunk in chunks), sentence)
+
+    def test_metering_acronyms_resolve_to_platform_without_literal_document_match(self):
+        chunks = chunk_document("synthetic/platform.md", "# Облачная платформа учёта электроэнергии\n\n"
+                                "## Что это\n\nПлатформа собирает показания тестовых приборов и отображает потребление.")
+        chunks += chunk_document("synthetic/losses.md", "# Поиск коммерческих потерь\n\n"
+                                 "Решение решает задачи на предприятии и выявляет коммерческие потери.")
+        retriever = Retriever(chunks)
+        for acronym in ("АСКУЭ", "аскуэ", "АИИС КУЭ", "ASKUE"):
+            with self.subTest(acronym=acronym):
+                question = f"Что такое {acronym} и какие задачи она решает на предприятии?"
+                self.assertEqual(make_plan(question, []).topic, "metering")
+                hits = retriever.search(question)
+                self.assertTrue(hits)
+                self.assertEqual({hit.chunk.source_id for hit in hits}, {"synthetic/platform.md"})
+
+    def test_explicit_acronym_switches_away_from_previous_loss_context(self):
+        plan = make_plan("Что такое АСКУЭ?", [
+            {"role": "user", "content": "Хотим находить коммерческие потери"},
+            {"role": "assistant", "content": "Какие данные есть для поиска потерь?"},
+        ])
+        self.assertEqual(plan.topic, "metering")
+        self.assertNotIn("потер", plan.query)
