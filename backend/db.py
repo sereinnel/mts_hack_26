@@ -53,6 +53,13 @@ def init_db():
             created_at TEXT NOT NULL,
             FOREIGN KEY(session_id) REFERENCES sessions(id)
         );
+        CREATE TABLE IF NOT EXISTS session_facts (
+            session_id TEXT PRIMARY KEY,
+            facts_json TEXT NOT NULL DEFAULT '{}',
+            stage TEXT,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY(session_id) REFERENCES sessions(id)
+        );
         CREATE TABLE IF NOT EXISTS leads (
             id TEXT PRIMARY KEY,
             session_id TEXT NOT NULL,
@@ -107,6 +114,32 @@ def list_messages(session_id: str) -> list[dict]:
             {**dict(row), "sources": json.loads(row["sources_json"])} | {"sources_json": None}
             for row in rows
         ]
+
+
+def get_session_facts(session_id: str) -> dict:
+    """Return the saved facts snapshot for a session, or a fresh empty dict."""
+    with connection() as db:
+        row = db.execute(
+            "SELECT facts_json FROM session_facts WHERE session_id=?", (session_id,)
+        ).fetchone()
+    return json.loads(row["facts_json"]) if row else {}
+
+
+def save_session_facts(session_id: str, facts: dict, stage: str | None = None) -> None:
+    """Replace the snapshot after a successful AI turn (AI sends a full snapshot)."""
+    if not isinstance(facts, dict):
+        raise TypeError("session facts must be a dictionary")
+    payload = json.dumps(facts, ensure_ascii=False)
+    with connection() as db:
+        db.execute(
+            """INSERT INTO session_facts (session_id, facts_json, stage, updated_at)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(session_id) DO UPDATE SET
+                   facts_json=excluded.facts_json,
+                   stage=excluded.stage,
+                   updated_at=excluded.updated_at""",
+            (session_id, payload, stage, utcnow()),
+        )
 
 
 def create_lead(session_id: str, full_name: str, phone: str, company: str, summary: str) -> dict:

@@ -12,7 +12,9 @@ import os
 from typing import Any
 
 
-async def consult_ai(question: str, history: list[dict[str, str]]) -> dict[str, Any]:
+async def consult_ai(
+    question: str, history: list[dict[str, str]], session_facts: dict | None = None
+) -> dict[str, Any]:
     target = os.getenv("AI_FUNCTION", "").strip()
     if not target:
         return {
@@ -22,18 +24,19 @@ async def consult_ai(question: str, history: list[dict[str, str]]) -> dict[str, 
             ),
             "sources": [],
             "intent": "mock",
+            "updated_facts": dict(session_facts or {}),
+            "stage": None,
         }
 
     module_name, separator, function_name = target.partition(":")
     if not separator or not module_name or not function_name:
         raise ValueError("AI_FUNCTION must be module.path:function")
     func = getattr(importlib.import_module(module_name), function_name)
-    # The AI core has no dependency on HTTP or SQLite.  Session facts are
-    # deliberately empty in this first integration; persistence comes next.
+    # AI core remains independent from HTTP/SQLite; backend provides the facts.
     kwargs = {
         "message": question,
         "history": history,
-        "session_facts": {},
+        "session_facts": dict(session_facts or {}),
         "debug": False,
     }
     if inspect.iscoroutinefunction(func):
@@ -48,8 +51,13 @@ async def consult_ai(question: str, history: list[dict[str, str]]) -> dict[str, 
     sources = result.get("source_ids", result.get("sources", [])) or []
     if not isinstance(sources, list):
         raise ValueError("AI function 'sources' must be a list")
+    updated_facts = result.get("updated_facts", session_facts or {})
+    if not isinstance(updated_facts, dict):
+        raise ValueError("AI function 'updated_facts' must be a dictionary")
     return {
         "answer": result["answer"].strip(),
         "sources": [str(s) for s in sources],
         "intent": str(result.get("intent", "unknown")),
+        "updated_facts": updated_facts,
+        "stage": result.get("stage"),
     }

@@ -85,15 +85,17 @@ async def chat(payload: ChatRequest):
     if not db.session_exists(payload.session_id, active_only=True):
         raise HTTPException(status_code=404, detail="Active session not found")
     history = [{"role": item["role"], "content": item["content"]} for item in db.list_messages(payload.session_id)]
+    session_facts = db.get_session_facts(payload.session_id)
     # Persist user text even if the upstream AI service later fails.
     db.add_message(payload.session_id, "user", payload.message)
     started = time.perf_counter()
     try:
-        result = await consult_ai(payload.message, history)
+        result = await consult_ai(payload.message, history, session_facts=session_facts)
     except Exception:
         log.exception("AI call failed for session_id=%s", payload.session_id)
         raise HTTPException(status_code=502, detail="AI temporarily unavailable") from None
     latency_ms = round((time.perf_counter() - started) * 1000)
+    db.save_session_facts(payload.session_id, result["updated_facts"], result.get("stage"))
     db.add_message(payload.session_id, "assistant", result["answer"], result["sources"], result["intent"])
     return {"session_id": payload.session_id, "answer": result["answer"], "sources": result["sources"], "intent": result["intent"], "latency_ms": latency_ms}
 
