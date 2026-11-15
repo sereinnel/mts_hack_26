@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import time
 from contextlib import asynccontextmanager
 from typing import Annotated
+from weakref import WeakValueDictionary
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,6 +21,7 @@ log = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init_db()
+    app.state.chat_locks = WeakValueDictionary()
     yield
 
 
@@ -83,6 +86,18 @@ def close_session(session_id: str):
 
 @app.post("/api/chat")
 async def chat(payload: ChatRequest, x_admin_token: Annotated[str | None, Header()] = None):
+    # Serialize the whole turn, including history read and snapshot persistence.
+    # The current deployment has one worker; separate sessions keep separate locks.
+    locks = app.state.chat_locks
+    lock = locks.get(payload.session_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        locks[payload.session_id] = lock
+    async with lock:
+        return await _chat_locked(payload, x_admin_token)
+
+
+async def _chat_locked(payload: ChatRequest, x_admin_token: str | None):
     if not db.session_exists(payload.session_id, active_only=True):
         raise HTTPException(status_code=404, detail="Active session not found")
     # Diagnostic details are internal; only a server-side admin token enables them.

@@ -209,6 +209,27 @@ class FlatExportTests(unittest.TestCase):
         self.assertEqual({path.name: path.read_text() for path in files}, before)
         self.assertEqual(sentinel.read_text(), "preserve")
 
+    def test_overwrite_export_does_not_follow_module_symlinks(self):
+        stage = self.root / "stage"
+        stage.mkdir()
+        canonical = self.root / "canonical.py"
+        canonical.write_text("preserve canonical source", encoding="utf-8")
+        (stage / "energytool_ai.py").symlink_to(canonical)
+        with self.assertRaises(FileExistsError):
+            export_modules(stage, overwrite=True)
+        self.assertEqual(canonical.read_text(), "preserve canonical source")
+
+    def test_overwrite_export_replaces_hard_link_without_changing_its_source(self):
+        stage = self.root / "stage"
+        stage.mkdir()
+        canonical = self.root / "canonical.py"
+        canonical.write_text("preserve canonical source", encoding="utf-8")
+        os.link(canonical, stage / "energytool_ai.py")
+        export_modules(stage, overwrite=True)
+        self.assertEqual(canonical.read_text(), "preserve canonical source")
+        self.assertIn("def answer_question", (stage / "energytool_ai.py").read_text())
+        self.assertEqual(list(stage.glob("*.tmp")), [])
+
     def test_flat_archive_imports_and_calls_model_without_repo_or_site_packages(self):
         files = export_modules(self.root / "stage")
         archive = self.root / "modules.zip"

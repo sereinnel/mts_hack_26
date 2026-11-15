@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import argparse
 import ast
+import os
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 
 class _FlatImports(ast.NodeTransformer):
@@ -51,12 +53,25 @@ def export_modules(output: str | Path, *, overwrite: bool = False) -> list[Path]
         ast.fix_missing_locations(tree)
         target = output / (names[path.stem] + ".py")
         content = f"# Generated from ai/{path.name}; edit the canonical source.\n" + ast.unparse(tree) + "\n"
+        if target.is_symlink():
+            raise FileExistsError("generated module is a symbolic link; use a fresh export directory")
         if target.exists() and not overwrite and target.read_text(encoding="utf-8") != content:
             raise FileExistsError("generated module differs; use a fresh directory or --overwrite")
         generated[target] = content
     output.mkdir(parents=True, exist_ok=True)
     for target, content in generated.items():
-        target.write_text(content, encoding="utf-8")
+        # Replacing a complete file avoids writing through hard links and keeps
+        # each existing module intact if generating its replacement fails.
+        temporary = None
+        try:
+            with NamedTemporaryFile(mode="w", encoding="utf-8", dir=output, suffix=".tmp", delete=False) as stream:
+                temporary = Path(stream.name)
+                stream.write(content)
+            os.chmod(temporary, 0o644)
+            temporary.replace(target)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
     return list(generated)
 
 
