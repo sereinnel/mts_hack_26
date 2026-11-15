@@ -116,3 +116,81 @@ class FactTests(unittest.TestCase):
         text = "Телеметрия Альфа    987     только для стенда"
         chunk = Chunk("alpha.md", "alpha.md#0000", "Тест", text)
         self.assertEqual(select_evidence("Телеметрия", [SearchHit(chunk, 1, 1, 1)]), [])
+
+    def test_reported_customer_industry_and_goal_are_extracted_without_kb(self):
+        result = answer_turn("У нас производственное предприятие. Хотим снизить расходы на электричество", [], {})
+        self.assertEqual(result["updated_facts"], {"industry": "manufacturing", "goal": "reduce_energy_costs"})
+        self.assertEqual(result["source_ids"], [])
+        self.assertIsNone(result["proposed_action"])
+
+    def test_extraction_preserves_unknown_fields_and_input_objects(self):
+        facts = {"custom": {"items": ["a"]}, "region": "Тестовый регион"}
+        original = deepcopy(facts)
+        result = answer_turn("Мы производственное предприятие. Хотим сократить затраты на электроэнергию", [], facts)
+        self.assertEqual(result["updated_facts"]["industry"], "manufacturing")
+        self.assertEqual(result["updated_facts"]["goal"], "reduce_energy_costs")
+        self.assertEqual(result["updated_facts"]["region"], facts["region"])
+        result["updated_facts"]["custom"]["items"].append("b")
+        self.assertEqual(facts, original)
+
+    def test_followup_preserves_facts_and_new_session_is_empty(self):
+        first = answer_turn("У нас завод. Хотим снизить расходы на электричество", [], {})
+        second = answer_turn("Какие данные нужны?", [], first["updated_facts"])
+        self.assertEqual(second["updated_facts"], first["updated_facts"])
+        self.assertEqual(answer_turn("Какие данные нужны?", [], {})["updated_facts"], {})
+
+    def test_explicit_current_corrections_replace_recognized_fields(self):
+        facts = {"industry": "manufacturing", "goal": "reduce_energy_costs", "custom": True}
+        result = answer_turn("Уточнение: мы сеть магазинов. Хотим автоматизировать учёт.", [], facts)
+        self.assertEqual(result["updated_facts"], {"industry": "retail", "goal": "automate_metering", "custom": True})
+        self.assertEqual(facts["industry"], "manufacturing")
+
+    def test_explicit_denials_remove_only_the_denied_known_value(self):
+        result = answer_turn("Мы не производственное предприятие. Мы не хотим снижать расходы на электричество.", [],
+                             {"industry": "manufacturing", "goal": "reduce_energy_costs", "custom": True})
+        self.assertEqual(result["updated_facts"], {"custom": True})
+        result = answer_turn("Мы не производственное предприятие.", [], {"industry": "retail"})
+        self.assertEqual(result["updated_facts"], {"industry": "retail"})
+
+    def test_questions_hypotheses_negations_and_reported_speech_do_not_add_facts(self):
+        messages = (
+            "Что такое производственное предприятие?",
+            "У нас производственное предприятие?",
+            "Если у нас производственное предприятие, хотим снизить расходы на электричество.",
+            "Допустим, у нас завод.",
+            "Возможно, мы производственное предприятие.",
+            "Мы не производственное предприятие. Мы не хотим снижать расходы на электричество.",
+            "Клиент сказал, у нас производственное предприятие.",
+            'Пример: «У нас завод. Хотим снизить расходы на электричество».',
+            '```\nУ нас завод. Хотим снизить расходы на электричество.\n```',
+        )
+        for message in messages:
+            with self.subTest(message=message):
+                self.assertEqual(answer_turn(message, [], {})["updated_facts"], {})
+
+    def test_only_user_statements_supply_historical_facts(self):
+        result = answer_turn("Какие данные нужны?", [
+            {"role": "user", "content": "У нас завод. Хотим снизить расходы на электричество."},
+            {"role": "assistant", "content": "Мы сеть магазинов. Хотим находить потери."},
+        ], {})
+        self.assertEqual(result["updated_facts"], {"industry": "manufacturing", "goal": "reduce_energy_costs"})
+
+    def test_history_does_not_overwrite_newer_saved_values(self):
+        result = answer_turn("Какие данные нужны?", [
+            {"role": "user", "content": "У нас завод. Хотим снизить расходы на электричество."},
+        ], {"industry": "retail", "goal": "automate_metering"})
+        self.assertEqual(result["updated_facts"], {"industry": "retail", "goal": "automate_metering"})
+
+    def test_embedded_dialogue_can_recover_old_empty_snapshot(self):
+        result = answer_turn("Пользователь: У нас производственное предприятие.\n"
+                             "Ассистент: Какая цель?\n"
+                             "Пользователь: Хотим снизить расходы на электричество.", [], {})
+        self.assertEqual(result["updated_facts"], {"industry": "manufacturing", "goal": "reduce_energy_costs"})
+
+    def test_definition_uses_intro_instead_of_an_incidental_condition(self):
+        intro = "Платформа собирает показания тестовых приборов и отображает потребление."
+        chunk = Chunk("platform.md", "platform.md#0000", "Платформа учёта / Что это",
+                      intro + "\n\nПлатформа решает задачи соответствия требованиям тестового предприятия.")
+        evidence = select_evidence("Что такое платформа и какие задачи решает на предприятии?",
+                                   [SearchHit(chunk, 1, 1, 1)])
+        self.assertEqual(evidence[0].text, intro)

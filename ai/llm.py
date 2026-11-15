@@ -29,11 +29,14 @@ class LLMConfig:
     api_key: str = field(repr=False)
     model: str
     timeout_seconds: float = 25.0
+    max_tokens: int = 1600
+    temperature: float = 0.0
 
     @classmethod
     def from_env(cls) -> LLMConfig:
         def first(*names: str) -> str:
-            return next((os.environ[name].strip() for name in names if os.getenv(name, "").strip()), "")
+            return next((os.environ[name].strip() for name in names
+                         if os.getenv(name, "").strip() and os.environ[name].strip() != name), "")
 
         base = first("LLM_BASE_URL", "BASE_URL", "OPENAI_BASE_URL").rstrip("/")
         key = first("LLM_API_KEY", "OPENAI_API_KEY")
@@ -43,6 +46,8 @@ class LLMConfig:
         try:
             parsed = urlsplit(base)
             timeout = float(os.getenv("AI_LLM_TIMEOUT_SECONDS", "25"))
+            max_tokens = int(first("MAX_TOKENS") or "1600")
+            temperature = float(first("TEMPERATURE") or "0")
         except ValueError:
             raise LLMConfigurationError("Invalid model API configuration") from None
         if (parsed.scheme not in {"http", "https"} or not parsed.netloc
@@ -50,18 +55,23 @@ class LLMConfig:
             raise LLMConfigurationError("LLM_BASE_URL must be an HTTP(S) API root without credentials or query")
         if not math.isfinite(timeout) or not 0 < timeout <= 120:
             raise LLMConfigurationError("AI_LLM_TIMEOUT_SECONDS must be in (0, 120]")
-        return cls(base, key, model, timeout)
+        if not 1 <= max_tokens <= 8192:
+            raise LLMConfigurationError("MAX_TOKENS must be in [1, 8192]")
+        if not math.isfinite(temperature) or not 0 <= temperature <= 2:
+            raise LLMConfigurationError("TEMPERATURE must be in [0, 2]")
+        return cls(base, key, model, timeout, max_tokens, temperature)
 
 
 class ChatClient:
     def __init__(self, config: LLMConfig):
         self.config = config
 
-    def complete(self, messages: list[dict], max_tokens: int = 1600) -> str:
+    def complete(self, messages: list[dict], max_tokens: int | None = None) -> str:
+        budget = self.config.max_tokens if max_tokens is None else min(max_tokens, self.config.max_tokens)
         body = json.dumps({
             "model": self.config.model,
-            "temperature": 0,
-            "max_tokens": max_tokens,
+            "temperature": self.config.temperature,
+            "max_tokens": budget,
             "messages": messages,
         }, ensure_ascii=False).encode("utf-8")
         request = Request(

@@ -24,6 +24,7 @@ _STOP = set("а без бы был была были быть в вам вас �
 _SUFFIXES = ("иями", "ами", "ого", "ему", "ому", "ыми", "ими", "иях", "ах", "ях", "ых", "их", "ов", "ев", "ий", "ый", "ой", "ая", "яя", "ую", "юю", "ое", "ее", "ые", "ие", "ам", "ям", "ом", "ем", "ей", "ия", "ию", "а", "я", "ы", "и", "у", "ю", "е", "о")
 # Query vocabulary only: these are language mappings, never product assertions.
 _EXPANSIONS = (
+    (r"\b(?:аскуэ|аиис\s*куэ|askue)\b", "платформа учёта электроэнергии сбор показаний потребление"),
     (r"фасад", "вертикальная поверхность здания"),
     (r"шифер", "шифер кровля"),
     (r"симк|sim|сим-карт", "сим-карты оператор"),
@@ -181,6 +182,7 @@ class Retriever:
     def search(self, query: str, top_k: int = 6, topic: str | None = None) -> list[SearchHit]:
         if top_k < 1:
             raise ValueError("top_k must be positive")
+        topic = topic or identify_topic(query)
         query = expanded_query(query)
         query_terms = Counter(words(query))
         if not query_terms:
@@ -258,6 +260,16 @@ def _signature(path: Path) -> tuple:
 @lru_cache(maxsize=4)
 def _cached_retriever(path: str, signature: tuple, is_index: bool) -> Retriever:
     return Retriever.load(path) if is_index else Retriever(load_chunks(path))
+
+
+def retriever_from_path(knowledge_base: str | Path) -> Retriever:
+    """Load an explicit corpus/index; never consult global AI path settings."""
+    if not isinstance(knowledge_base, (str, Path)):
+        raise TypeError("knowledge_base must be a ZIP, directory or JSON index path")
+    if isinstance(knowledge_base, str) and not knowledge_base.strip():
+        raise ValueError("knowledge_base path must not be empty")
+    path = Path(knowledge_base).expanduser().resolve()
+    return _cached_retriever(str(path), _signature(path), path.suffix.lower() == ".json")
 
 
 def configured_retriever() -> Retriever | None:
