@@ -44,7 +44,7 @@ docker compose up --build
 
 Доступен локальный RAG baseline без дополнительных зависимостей. AI извлекает явно сообщённые тип организации и цель, а backend сохраняет полный `updated_facts` в SQLite по сессии. Прямой импорт, построение индекса и ограничения извлечения описаны в [документации AI-модуля](docs/AI_MODULE.md).
 
-Для backend подготовлена [задача интеграции с критериями приёмки](docs/BACKEND_AI_TASK.md). Необязательная генерация и семантический Critic пока проверены на заглушках; предварительный разбор качества и команды будущего прогона на API описаны в [AI_QUALITY.md](docs/AI_QUALITY.md).
+Для backend подготовлена [задача интеграции с критериями приёмки](docs/BACKEND_AI_TASK.md). Подключение настоящей локальной Qwen через Docker описано в [LOCAL_MODEL.md](docs/LOCAL_MODEL.md); разбор качества и команды оценки — в [AI_QUALITY.md](docs/AI_QUALITY.md). Конкурсная платформа передаёт параметры своего API автоматически, личный ключ участника не нужен.
 
 Для конкурсного `solution.py` доступен `answer_question(question, knowledge_base) -> str`. AI-модули экспортируются в плоскую структуру через `python -m scripts.export_ai_modules --output data/submission_ai`. Импорт из корня конкурсного ZIP: `from energytool_ai import answer_question`. Подробнее: [SUBMISSION_AI.md](docs/SUBMISSION_AI.md).
 

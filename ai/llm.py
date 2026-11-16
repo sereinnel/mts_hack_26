@@ -6,6 +6,8 @@ request bodies, response bodies or the configured URL.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from contextlib import suppress
+from http.client import HTTPException
 import json
 import math
 import os
@@ -86,8 +88,10 @@ class ChatClient:
                 raise LLMError("empty_model_response")
             return content.strip()
         except HTTPError as exc:
+            with suppress(OSError, HTTPException):
+                exc.close()
             raise LLMError(f"api_http_{exc.code}") from None
-        except (URLError, TimeoutError, OSError):
+        except (URLError, TimeoutError, OSError, HTTPException):
             raise LLMError("api_transport_error") from None
         except (ValueError, KeyError, IndexError, TypeError):
             raise LLMError("invalid_model_response") from None

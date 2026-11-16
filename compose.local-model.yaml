@@ -1,0 +1,20 @@
+# Optional Linux local CPU model connection. Start with --host-network.
+services:
+  api:
+    build:
+      context: .
+      network: host
+    ports: !reset []
+    network_mode: host
+    command: uvicorn backend.main:app --host 127.0.0.1 --port 8000
+    environment:
+      AI_FUNCTION: ai.consultant:answer_turn
+      AI_MODE: llm
+      AI_INDEX_PATH: ""
+      AI_KB_PATH: /app/data/local-model-knowledge-base.zip
+      LLM_BASE_URL: http://127.0.0.1:${LOCAL_LLM_PORT:-11435}/v1
+      LLM_API_KEY: ollama
+      LLM_MODEL: ${LOCAL_LLM_MODEL:-qwen3:4b-instruct-2507-q4_K_M}
+      AI_LLM_TIMEOUT_SECONDS: "120"
+      MAX_TOKENS: "768"
+      TEMPERATURE: "0"

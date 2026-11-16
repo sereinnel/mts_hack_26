@@ -5,7 +5,7 @@ judge meaning. A real model review can still be wrong.
 """
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 import json
 import re
 
@@ -45,7 +45,10 @@ def usable_hits(hits: list[SearchHit]) -> list[SearchHit]:
 
 
 def _evidence(hits: list[SearchHit]) -> list[dict]:
-    return [asdict(hit.chunk) for hit in usable_hits(hits)]
+    # Only the document identifier is a valid output citation. Exposing the
+    # internal chunk_id alongside it makes small models cite the wrong field.
+    return [{"source_id": hit.chunk.source_id, "heading": hit.chunk.heading,
+             "text": hit.chunk.text} for hit in usable_hits(hits)]
 
 
 def _messages(system: str, payload: dict) -> list[dict]:

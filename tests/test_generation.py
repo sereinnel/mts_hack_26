@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+from http.client import IncompleteRead
 import json
 import os
 from pathlib import Path
@@ -86,6 +87,24 @@ class ClientProtocolTests(unittest.TestCase):
                 client.complete([])
             self.assertEqual(transport.call_count, 1)
 
+    def test_truncated_http_response_is_a_sanitized_transport_failure(self):
+        class TruncatedResponse(io.BytesIO):
+            def read(self, *args, **kwargs):
+                raise IncompleteRead(b"private partial response", 100)
+
+        client = ChatClient(LLMConfig("https://example.invalid/v1", "fake", "test"))
+        with patch("ai.llm.urlopen", return_value=TruncatedResponse()):
+            with self.assertRaisesRegex(LLMError, "^api_transport_error$"):
+                client.complete([])
+
+    def test_http_error_response_is_closed_after_sanitizing(self):
+        response = io.BytesIO(b"private error response")
+        error = HTTPError("https://example.invalid/v1", 503, "private body", {}, response)
+        client = ChatClient(LLMConfig("https://example.invalid/v1", "fake", "test"))
+        with patch("ai.llm.urlopen", side_effect=error), self.assertRaisesRegex(LLMError, "^api_http_503$"):
+            client.complete([])
+        self.assertTrue(response.closed)
+
     def test_malformed_provider_responses_are_rejected(self):
         client = ChatClient(LLMConfig("https://example.invalid/v1", "fake", "test"))
         for payload in (b"not json", b'{"choices": []}', b'{"choices": [{"message": {"content": null}}]}'):
@@ -132,6 +151,7 @@ class GeneratedAnswerTests(unittest.TestCase):
     def test_unknown_sources_and_extra_action_fields_are_rejected(self):
         cases = [
             {"answer": self.answer, "source_ids": ["invented.md"]},
+            {"answer": self.answer, "source_ids": [self.chunk.chunk_id]},
             {"answer": self.answer, "source_ids": []},
             {"answer": self.answer, "source_ids": self.chunk.source_id},
             {"answer": self.answer, "source_ids": [self.chunk.source_id], "proposed_action": "create_lead"},
