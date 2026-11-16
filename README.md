@@ -1,64 +1,58 @@
-# EnergyTool Backend — стартовый шаблон для участника №2
+# EnergyTool — AI-консультант по энергетике
 
-Это минимальный **рабочий backend с MOCK AI**, а не готовое решение МТС и не конкурсный сабмит. Он показывает API, хранение истории, формы заявок и точки интеграции с RAG.
+Веб-приложение для консультаций бизнеса по энергоснабжению, учёту электроэнергии и снижению затрат. Разработано в рамках кейса МТС на Hack&Change 2026. Ответы строятся на базе знаний EnergyTool с использованием RAG.
 
-## Локальный запуск
+## Возможности
 
-```bash
-python -m venv .venv
-source .venv/bin/activate     # Windows: .venv\\Scripts\\activate
-pip install -r requirements.txt
-uvicorn backend.main:app --reload
-```
+- Поиск по базе знаний и ответы с указанием источников.
+- Диалог с сохранением истории и контекста отдельной сессии.
+- Сбор заявок на консультацию с согласием на обратную связь и защитой от дубликатов.
+- Диагностика AI: использованные документы, маршрут обработки и время ответа.
 
-Swagger: http://localhost:8000/docs
+## Стек
 
-Или через Docker:
+**Frontend:** HTML, CSS, JavaScript.  
+**Backend:** Python, FastAPI, SQLite.  
+**AI:** RAG, Planner / Consultant / Critic, OpenAI-совместимый API.  
+**Инфраструктура:** Docker Compose.
 
-```bash
-cp .env.example .env          # задайте длинный ADMIN_TOKEN
-# Linux/macOS: mkdir -p data
-docker compose up --build
-```
+## Запуск
 
-## HTTP API
-
-- `GET /health`
-- `POST /api/sessions` — создаёт новую историю
-- `GET /api/sessions` — список сессий (в демо без аутентификации)
-- `GET /api/sessions/{id}/messages` — история
-- `POST /api/sessions/{id}/close` — закрывает диалог, не удаляя историю
-- `POST /api/chat` — `{"session_id":"...", "message":"..."}`
-- `POST /api/leads` — `{"session_id":"...", "full_name":"...", "phone":"...", "company":"...", "consent_to_contact":true}`
-- `GET /api/leads` — заголовок `X-Admin-Token: <ADMIN_TOKEN>`; без заданного ADMIN_TOKEN endpoint недоступен
-
-## Подключение RAG участника №1
-
-`backend/ai_adapter.py` подключён к согласованному синхронному `ai.consultant.answer_turn(message, history, session_facts, debug=False)`. Для включения задайте `AI_FUNCTION=ai.consultant:answer_turn` и путь к приватной БЗ/индексу. Адаптер передаёт историю и факты сессии, а в существующий HTTP-ответ преобразует:
-
-```python
-{"answer": "...", "sources": ["relative/document.md"], "intent": "unknown"}
-```
-
-Без AI_FUNCTION эндпоинт работает только в демонстрационном режиме и возвращает заглушку; реальные рекомендации отсутствуют.
-
-Доступен локальный RAG baseline без дополнительных зависимостей. AI извлекает явно сообщённые тип организации и цель, а backend сохраняет полный `updated_facts` в SQLite по сессии. Прямой импорт, построение индекса и ограничения извлечения описаны в [документации AI-модуля](docs/AI_MODULE.md).
-
-Для backend подготовлена [задача интеграции с критериями приёмки](docs/BACKEND_AI_TASK.md). Подключение настоящей локальной Qwen через Docker описано в [LOCAL_MODEL.md](docs/LOCAL_MODEL.md); разбор качества и команды оценки — в [AI_QUALITY.md](docs/AI_QUALITY.md). Конкурсная платформа передаёт параметры своего API автоматически, личный ключ участника не нужен.
-
-Для конкурсного `solution.py` доступен `answer_question(question, knowledge_base) -> str`. AI-модули экспортируются в плоскую структуру через `python -m scripts.export_ai_modules --output data/submission_ai`. Импорт из корня конкурсного ZIP: `from energytool_ai import answer_question`. Подробнее: [SUBMISSION_AI.md](docs/SUBMISSION_AI.md).
-
-## Проверка
+Нужны Docker Compose, Node.js и файл `knowledge-base.zip` из материалов кейса.
 
 ```bash
-pip install pytest httpx
-python -m pytest -q
+git clone https://github.com/sereinnel/mts_hack_26.git
+cd mts_hack_26
+cp .env.example .env
+mkdir -p data
 ```
 
-## Важно для хакатона
+Поместите базу знаний в `data/knowledge-base.zip` и задайте в `.env`:
 
-- Конкурсный `solution.py` — отдельная точка входа из образца организаторов. Он читает `DATA_DIR/questions.csv`, `DATA_DIR/knowledge-base.zip`, формирует `submission.csv` и **не использует состояние SQLite между вопросами**.
-- Не публикуйте базу знаний или ключи в открытом репозитории.
-- Используйте только вымышленные контакты.
-- Это демо: маршруты просмотра сессий не имеют авторизации, поэтому не размещайте его публично с реальными данными.
-- Для production понадобятся авторизация, защита от злоупотреблений, полноценная политика обработки ПДн, механизм доставки заявок, retention и наблюдаемость.
+```dotenv
+AI_FUNCTION=ai.consultant:answer_turn
+AI_MODE=extractive
+AI_KB_PATH=/app/data/knowledge-base.zip
+```
+
+Запустите backend:
+
+```bash
+docker compose up -d --build
+```
+
+В отдельном терминале запустите интерфейс:
+
+```bash
+cd frontend
+npm run dev
+```
+
+**Веб-интерфейс:** http://127.0.0.1:5173  
+**Swagger API:** http://127.0.0.1:8000/docs
+
+Для работы через LLM задайте `AI_MODE=llm`, `LLM_BASE_URL`, `LLM_API_KEY` и `LLM_MODEL` в `.env`.
+
+Документация по API: [docs/API_CONTRACT.md](docs/API_CONTRACT.md). В репозитории также находится `solution.py` для обработки вопросов из CSV.
+
+База знаний, локальные данные и ключи доступа в публичный репозиторий не включены.
